@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    name: Test (${{ matrix.job }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - job: minimal
+            os: ubuntu-latest
+            extras: test
+          - job: minimal-mac
+            os: macos-latest
+            extras: test
+          - job: full
+            os: ubuntu-latest
+            extras: test,embeddings,tree-sitter
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install system deps (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsndfile1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -e '.[test]'
+          if [[ "${{ matrix.job }}" == "full" ]]; then
+            python -m pip install -r requirements-embeddings.txt
+          fi
+
+      - name: Build tree-sitter grammars (full only)
+        if: matrix.job == 'full'
+        run: |
+          python tools/build_treesitter.py || true
+
+      - name: Run tests
+        run: pytest -q
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [minimal, full]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install -U pip
+          if [ "${{ matrix.variant }}" = "full" ]; then
+            pip install -e .[test,embeddings,tree-sitter]
+          else
+            pip install -e .[test]
+          fi
+      - name: Run tests
+        run: |
+          . .venv/bin/activate
+          pytest -q --cov=./ --cov-report=term-missing
+      - name: Lint
+        run: |
+          . .venv/bin/activate
+          pip install flake8
+          flake8
