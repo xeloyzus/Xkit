@@ -1,0 +1,10 @@
+# Pinned, known-compatible embeddings stack (use a dedicated environment)
+sentence-transformers>=2.2.2,<2.6
+numpy>=1.24,<2.0
+tiktoken>=0.4.0,<0.6
+chromadb>=0.3.25,<0.5
+faiss-cpu>=1.7.3,<2.0
+torch>=2.0.0,<3.0.0
+
+# Install with:
+# python -m pip install -r requirements-embeddings.txt

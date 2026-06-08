@@ -1,0 +1,28 @@
+{
+  "chunk_count": 7,
+  "file_count": 3,
+  "files": {
+    "src/auth/useAuth.ts": {
+      "chunk_count": 5,
+      "hash": "1d8ad0f26c2e2678",
+      "size_chars": 1957,
+      "token_estimate": 223
+    },
+    "src/router/ProtectedRoute.tsx": {
+      "chunk_count": 1,
+      "hash": "70ff9da6373e531e",
+      "size_chars": 249,
+      "token_estimate": 58
+    },
+    "tests/auth-refresh.test.ts": {
+      "chunk_count": 1,
+      "hash": "0150d39763723eca",
+      "size_chars": 303,
+      "token_estimate": 71
+    }
+  },
+  "full_repo_token_estimate": 352,
+  "project_root": "demo_project",
+  "updated_at": 1780958082,
+  "version": 1
+}

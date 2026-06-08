@@ -1,0 +1,29 @@
+[project]
+name = "xkit"
+version = "0.2.0"
+description = "Xkit: Local chunking, retrieval, and metrics tool for lowering AI coding-agent token costs"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov", "pre-commit", "flake8"]
+embeddings = [
+	"sentence-transformers>=2.2.2,<2.6",
+	"numpy>=1.24,<2.0",
+	"tiktoken>=0.4.0,<0.6",
+	"chromadb>=0.3.25,<0.5",
+	"faiss-cpu>=1.7.3,<2.0",
+	"torch>=2.0.0,<3.0.0",
+]
+monitoring = ["prometheus-client>=0.16.0,<0.20"]
+tree-sitter = ["tree-sitter>=0.20.0,<1.0"]
+all = ["xkit[test]", "xkit[embeddings]", "xkit[tree-sitter]"]
+
+[project.scripts]
+xkit = "xkit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["xkit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,2 @@
+[console_scripts]
+xkit = xkit.cli:main

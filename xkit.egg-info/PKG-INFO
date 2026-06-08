@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: xkit
+Version: 0.2.0
+Summary: Xkit: Local chunking, retrieval, and metrics tool for lowering AI coding-agent token costs
+Requires-Python: >=3.10
+Provides-Extra: test
+Requires-Dist: pytest; extra == "test"
+Requires-Dist: pytest-cov; extra == "test"
+Requires-Dist: pre-commit; extra == "test"
+Requires-Dist: flake8; extra == "test"
+Provides-Extra: embeddings
+Requires-Dist: sentence-transformers; extra == "embeddings"
+Requires-Dist: numpy; extra == "embeddings"
+Requires-Dist: tiktoken; extra == "embeddings"
+Requires-Dist: chromadb; extra == "embeddings"
+Provides-Extra: tree-sitter
+Requires-Dist: tree-sitter; extra == "tree-sitter"
+Provides-Extra: all
+Requires-Dist: xkit[test]; extra == "all"
+Requires-Dist: xkit[embeddings]; extra == "all"
+Requires-Dist: xkit[tree-sitter]; extra == "all"
