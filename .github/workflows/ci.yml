@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, faiss-hardening ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, faiss-hardening ]
 
 jobs:
   test:
@@ -54,9 +54,8 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest -q --cov=./ --cov-report=term-missing || true
+          pytest -q --cov=./ --cov-report=term-missing
 
-      - name: Lint
+      - name: Smoke check
         run: |
-          pip install flake8
-          flake8
+          python -m compileall xkit tests

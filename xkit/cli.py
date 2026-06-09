@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -193,8 +194,6 @@ def cmd_embeddings_export(args) -> int:
         if free_ids is not None:
             np.save(str(tmp / "free_ids.npy"), np.array(free_ids, dtype=object))
         # create archive
-        import shutil
-
         archive = str(out) if out.suffix in (".zip", ".tar", ".gz") else str(out) + ".tar.gz"
         shutil.make_archive(str(Path(archive).with_suffix("") ), 'gztar', root_dir=str(tmp))
         # cleanup tmp dir
