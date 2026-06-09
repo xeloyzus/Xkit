@@ -1,6 +1,6 @@
 [project]
 name = "xkit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Xkit: Local chunking, retrieval, and metrics tool for lowering AI coding-agent token costs"
 requires-python = ">=3.10"
 dependencies = []
