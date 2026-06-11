@@ -4,7 +4,7 @@ import time
 import pytest
 
 
-def has_faiss():
+def has_faiss_dependencies():
     try:
         import faiss  # noqa: F401
         import numpy  # noqa: F401
@@ -14,7 +14,7 @@ def has_faiss():
         return False
 
 
-@pytest.mark.skipif(not has_faiss(), reason="faiss/numpy not installed")
+@pytest.mark.skipif(not has_faiss_dependencies(), reason="faiss/numpy not installed")
 def test_faiss_concurrent_writes_and_reads(tmp_path):
     """Integration-style test: spawn two processes that upsert different ids while main process queries."""
     import numpy as np
