@@ -1,14 +1,17 @@
 import pytest
 
 
-def has_faiss():
+def has_faiss_dependencies():
     try:
+        import faiss  # noqa: F401
+        import numpy  # noqa: F401
+
         return True
     except Exception:
         return False
 
 
-@pytest.mark.skipif(not has_faiss(), reason="faiss not installed")
+@pytest.mark.skipif(not has_faiss_dependencies(), reason="faiss/numpy not installed")
 def test_compact_and_remove(tmp_path):
     import numpy as np
 
