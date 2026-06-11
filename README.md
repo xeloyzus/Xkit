@@ -1,5 +1,11 @@
 # Xkit
 
+[ - - Experimental Phase - - ] 
+
+```
+Underdevelopment and being tested, but most efficient on larger repos
+```
+
 Token-efficient code retrieval for AI coding agents. Index a project once, then retrieve only the chunks relevant to each task — instead of letting the agent read file after file.
 
 Works fully offline with zero dependencies (stdlib-only BM25). Optional extras add semantic embeddings (FAISS-backed), AST-aware chunking (tree-sitter), exact token counting (tiktoken), and an **MCP server** so agents like Claude Code, Cline, and Cursor can call Xkit natively.
