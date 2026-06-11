@@ -1,11 +1,10 @@
-import os
 import tempfile
 
 import pytest
 
 
 def test_faiss_store_upsert_query():
-    faiss = pytest.importorskip("faiss")
+    pytest.importorskip("faiss")
     np = pytest.importorskip("numpy")
     from xkit.embeddings import FAISSEmbeddingStore
 
@@ -21,9 +20,10 @@ def test_faiss_store_upsert_query():
 
 
 def test_tree_sitter_chunking():
-    ts = pytest.importorskip("tree_sitter")
-    from xkit.chunker import chunk_file
+    pytest.importorskip("tree_sitter")
     from pathlib import Path
+
+    from xkit.chunker import chunk_file
 
     txt = """
 def foo():

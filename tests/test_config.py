@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+
 from xkit.config import XkitConfig, xkit_dir
 
 
@@ -16,7 +17,7 @@ def test_default_config():
     assert cfg.default_budget_tokens == 12000
     assert ".git" in cfg.ignored_dirs
     assert ".py" in cfg.code_extensions
-    assert cfg.retriever == "tfidf"
+    assert cfg.retriever == "bm25"
 
 
 def test_xkit_dir():
@@ -51,7 +52,7 @@ def test_config_save_and_load():
         # Load it back
         loaded = XkitConfig.load(root)
         assert loaded.max_chunk_chars == 6000
-        assert loaded.retriever == "tfidf"
+        assert loaded.retriever == "bm25"
 
 
 def test_config_merge():

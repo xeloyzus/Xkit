@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from prometheus_client import start_http_server, Gauge
+    from prometheus_client import Gauge, start_http_server
     _PROM_AVAILABLE = True
 except Exception:
     _PROM_AVAILABLE = False

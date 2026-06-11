@@ -1,26 +1,39 @@
 [project]
 name = "xkit"
-version = "0.3.0"
-description = "Xkit: Local chunking, retrieval, and metrics tool for lowering AI coding-agent token costs"
-requires-python = ">=3.10"
+version = "0.4.0"
+description = "Token-efficient code retrieval for AI coding agents: index once, retrieve only relevant context per task"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
 dependencies = []
+keywords = ["ai", "coding-agent", "retrieval", "rag", "context", "mcp", "bm25"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov", "pre-commit", "flake8"]
+tokens = ["tiktoken>=0.5"]
+treesitter = ["tree-sitter-language-pack>=0.13"]
 embeddings = [
-	"sentence-transformers>=2.2.2,<2.6",
-	"numpy>=1.24,<2.0",
-	"tiktoken>=0.4.0,<0.6",
-	"chromadb>=0.3.25,<0.5",
-	"faiss-cpu>=1.7.3,<2.0",
-	"torch>=2.0.0,<3.0.0",
+    "sentence-transformers>=2.6",
+    "numpy>=1.24",
+    "faiss-cpu>=1.7.4",
 ]
-monitoring = ["prometheus-client>=0.16.0,<0.20"]
-tree-sitter = ["tree-sitter>=0.20.0,<1.0"]
-all = ["xkit[test]", "xkit[embeddings]", "xkit[tree-sitter]"]
+mcp = ["mcp>=1.2"]
+all = ["xkit[test,tokens,treesitter,embeddings,mcp]"]
 
 [project.scripts]
 xkit = "xkit.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["xkit*"]

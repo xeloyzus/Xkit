@@ -23,8 +23,12 @@ class XkitConfig:
         ".sql", ".html", ".css", ".scss", ".json", ".yaml", ".yml", ".md", ".toml",
         ".xml", ".gradle", ".sh",
     })
+    # File handling
+    max_file_bytes: int = 2_000_000  # skip files larger than this (generated/minified)
+    # Metrics
+    metrics_history_limit: int = 200  # cap per-run history lists in metrics.json
     # Embedding / retrieval
-    retriever: str = "tfidf"  # "tfidf" | "embeddings"
+    retriever: str = "bm25"  # "bm25" | "tfidf" | "embeddings" | "hybrid"
     embedding_model: str = "all-MiniLM-L6-v2"  # sentence-transformers model name
     embedding_device: str = "cpu"
 
@@ -70,8 +74,9 @@ class XkitConfig:
                 "# default_top_k = 8",
                 "# default_budget_tokens = 12000",
                 "",
-                "# Retriever: 'tfidf' (no deps) or 'embeddings' (requires sentence-transformers)",
-                '# retriever = "tfidf"',
+                "# Retriever: 'bm25' (no deps, default), 'tfidf' (legacy),",
+                "# 'embeddings' (requires sentence-transformers), or 'hybrid' (bm25+embeddings)",
+                '# retriever = "bm25"',
                 '# embedding_model = "all-MiniLM-L6-v2"',
                 "",
                 "# Ignored directories (list format)",

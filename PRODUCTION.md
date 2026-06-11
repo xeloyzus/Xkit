@@ -4,7 +4,6 @@ This document summarizes steps and considerations to run Xkit on large repositor
 
 Prerequisites
 - Python 3.11+ (virtualenv)
-- Build tools for tree-sitter grammars (gcc/clang, git, python-dev headers)
 - Optional: GPU for embeddings (torch) if using large sentence-transformers models
 
 Quick install (recommended minimal):
@@ -19,15 +18,16 @@ pip install -e .[test]
 To enable semantic embeddings and persistent vector store (optional but recommended for accuracy):
 
 ```bash
-pip install -e ".[embeddings,monitoring]"
+pip install -e ".[embeddings]"
 ```
 
 Tree-sitter grammars
-- Use `tools/build_treesitter.py` as a starting point, but building grammars is environment-specific.
-- Alternatively, keep regex fallback; tree-sitter improves chunking quality but requires per-language grammars.
+- Install the `treesitter` extra (prebuilt wheels — no compilation). Xkit also accepts
+  `tree-sitter-languages` or official `tree_sitter_<lang>` packages, and falls back to
+  regex symbol detection when none are installed.
 
 Token counting
-- `tiktoken` is used when available for accurate token counts. Install via the `embeddings` extra.
+- `tiktoken` is used when available for accurate token counts. Install via the `tokens` extra.
 
 Observability
 - A minimal Prometheus exporter is available: call `xkit.observability.start_exporter(Path('/path/to/project'), port=8000)` to expose metrics.

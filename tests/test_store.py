@@ -2,7 +2,8 @@
 
 import tempfile
 from pathlib import Path
-from xkit.store import write_json, read_json, write_jsonl, read_jsonl, append_jsonl
+
+from xkit.store import append_jsonl, read_json, read_jsonl, write_json, write_jsonl
 
 
 def test_write_read_json():

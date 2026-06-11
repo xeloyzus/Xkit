@@ -6,11 +6,12 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from .agent_context import retrieve_context, format_context_markdown
+
+from .agent_context import format_context_markdown, retrieve_context
 from .config import XkitConfig
-from .indexer import build_index, update_changed_files
-from .metrics import load_metrics, format_metrics_report
 from .embeddings import FAISSEmbeddingStore
+from .indexer import build_index, update_changed_files
+from .metrics import format_metrics_report, load_metrics
 
 
 def positive_int(value: str) -> int:
@@ -194,6 +195,8 @@ def cmd_embeddings_export(args) -> int:
         if free_ids is not None:
             np.save(str(tmp / "free_ids.npy"), np.array(free_ids, dtype=object))
         # create archive
+        import shutil
+
         archive = str(out) if out.suffix in (".zip", ".tar", ".gz") else str(out) + ".tar.gz"
         shutil.make_archive(str(Path(archive).with_suffix("") ), 'gztar', root_dir=str(tmp))
         # cleanup tmp dir
@@ -215,6 +218,7 @@ def cmd_embeddings_import(args) -> int:
         return 2
     namespace = args.namespace
     import tarfile
+
     import numpy as np
 
     tmp = Path(".tmp_xkit_import")
@@ -248,6 +252,9 @@ def cmd_embeddings_cleanup(args) -> int:
     base = root / ".xkit" / "faiss"
     cutoff = time.time() - (days * 24 * 3600)
     removed = 0
+    if not base.exists():
+        print(json.dumps({"status": "cleanup_complete", "removed": 0}, indent=2))
+        return 0
     for ns in base.iterdir():
         bak = ns / "backups"
         if not bak.exists():
@@ -265,6 +272,22 @@ def cmd_embeddings_cleanup(args) -> int:
                     pass
     print(json.dumps({"status": "cleanup_complete", "removed": removed}, indent=2))
     return 0
+
+
+
+
+def cmd_mcp(args) -> int:
+    """Run Xkit as an MCP server for coding agents (Claude Code, Cline, ...)."""
+    root = Path(args.project).resolve()
+    if not root.exists():
+        print(f"Project not found: {root}", file=sys.stderr)
+        return 2
+    try:
+        from .mcp_server import serve
+        return serve(root)
+    except ImportError as e:
+        print(str(e), file=sys.stderr)
+        return 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -319,6 +342,27 @@ def main(argv: list[str] | None = None) -> int:
     p_emb_health.add_argument("project")
     p_emb_health.add_argument("namespace")
     p_emb_health.set_defaults(func=cmd_embeddings_health)
+
+    p_emb_export = sub.add_parser("embeddings-export", help="Export a FAISS namespace to a tar.gz archive")
+    p_emb_export.add_argument("project")
+    p_emb_export.add_argument("namespace")
+    p_emb_export.add_argument("dest")
+    p_emb_export.set_defaults(func=cmd_embeddings_export)
+
+    p_emb_import = sub.add_parser("embeddings-import", help="Import a FAISS namespace from a tar.gz archive")
+    p_emb_import.add_argument("project")
+    p_emb_import.add_argument("namespace")
+    p_emb_import.add_argument("src")
+    p_emb_import.set_defaults(func=cmd_embeddings_import)
+
+    p_emb_cleanup = sub.add_parser("embeddings-cleanup", help="Delete FAISS backups older than N days")
+    p_emb_cleanup.add_argument("project")
+    p_emb_cleanup.add_argument("--retention-days", type=positive_int, default=14)
+    p_emb_cleanup.set_defaults(func=cmd_embeddings_cleanup)
+
+    p_mcp = sub.add_parser("mcp", help="Run as an MCP server for coding agents (requires xkit[mcp])")
+    p_mcp.add_argument("project")
+    p_mcp.set_defaults(func=cmd_mcp)
 
     args = parser.parse_args(argv)
     return args.func(args)

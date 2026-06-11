@@ -1,7 +1,8 @@
 """Tests for the chunker module."""
 
 from pathlib import Path
-from xkit.chunker import chunk_file, Chunk, _find_symbol
+
+from xkit.chunker import Chunk, _find_symbol, chunk_file
 
 
 def test_empty_file():
@@ -65,7 +66,7 @@ def test_overlap_lines():
         first_end_lines = result[0].text.splitlines()[-5:]
         second_start_lines = result[1].text.splitlines()[:5]
         # At least some overlap should exist
-        assert any(l in second_start_lines for l in first_end_lines)
+        assert any(line in second_start_lines for line in first_end_lines)
 
 
 def test_find_symbol():
@@ -80,8 +81,7 @@ def test_find_symbol():
     assert _find_symbol("const x = () => {") == "x"
     assert _find_symbol("async function fetch() {") == "fetch"
     assert _find_symbol("export default class Router {") == "Router"
-    assert _find_symbol("fn main() {") is None  # Rust-style, not matched by default patterns
-    assert _find_symbol("fn main() {") is None  # Would need Rust pattern
+    assert _find_symbol("fn main() {") == "main"  # Rust functions now detected
 
 
 def test_no_symbol_line():

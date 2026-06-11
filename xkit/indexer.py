@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
 from .chunker import chunk_file
 from .config import XkitConfig
 from .files import iter_project_files, read_text_safe, sha256_text
+from .logging import get_logger
 from .store import ensure_store, read_json, read_jsonl, write_json, write_jsonl
 from .token_estimator import estimate_tokens
-from .logging import get_logger
 
 _logger = get_logger(__name__)
 
@@ -19,6 +21,64 @@ def _progress(msg: str, show: bool = False):
     _logger.debug(msg)
     if show:
         print(f"  {msg}", file=sys.stderr)
+
+
+
+
+def _append_metric(store, config: XkitConfig, key: str, entry: dict):
+    """Append a run entry to metrics.json, capping history length."""
+    metrics = read_json(store / "metrics.json", {})
+    metrics.setdefault(key, [])
+    metrics[key].append(entry)
+    limit = getattr(config, "metrics_history_limit", 200)
+    if len(metrics[key]) > limit:
+        metrics[key] = metrics[key][-limit:]
+    write_json(store / "metrics.json", metrics)
+
+
+def _open_embed_store(project_root: Path, config: XkitConfig):
+    """Best-effort handle to the persistent FAISS store (None if faiss missing)."""
+    try:
+        from .embeddings import FAISSEmbeddingStore
+        return FAISSEmbeddingStore(str(project_root / config.index_dir_name / "faiss"))
+    except Exception:
+        return None
+
+
+def _embed_and_persist(embed_store, project_root: Path, store, config: XkitConfig, chunks: list[dict], run_type: str):
+    """Encode chunks with sentence-transformers and upsert into FAISS.
+
+    No-op (with a warning) when optional embedding deps are missing.
+    """
+    if embed_store is None or not chunks:
+        return
+    try:
+        import numpy as np
+
+        from .retrieval import _get_sentence_transformer, embedding_input_text
+    except ImportError:
+        _logger.debug("Embedding deps not installed; skipping vector index (%s)", run_type)
+        return
+    try:
+
+        model = _get_sentence_transformer(config.embedding_model, config.embedding_device)
+        texts = [embedding_input_text(c) for c in chunks]
+        ids = [c.get("chunk_id") for c in chunks]
+        metadatas = [{k: v for k, v in c.items() if k != "text"} for c in chunks]
+        embs = np.asarray(
+            model.encode(texts, show_progress_bar=False, normalize_embeddings=True),
+            dtype=np.float32,
+        )
+        t0 = time.time()
+        embed_store.upsert(str(project_root.name), ids, embs, metadatas, texts)
+        _append_metric(store, config, "embedding_runs", {
+            "type": run_type,
+            "duration_sec": round(time.time() - t0, 3),
+            "chunk_count": len(ids),
+            "updated_at": int(time.time()),
+        })
+    except Exception as e:
+        _logger.warning("Embedding upsert failed (%s): %s", run_type, e)
 
 
 def build_index(project_root: Path, config: XkitConfig, show_progress: bool = False) -> dict:
@@ -33,15 +93,10 @@ def build_index(project_root: Path, config: XkitConfig, show_progress: bool = Fa
     total = len(all_files)
     _progress(f"Indexing {total} files...", show_progress)
 
-    # Try to initialize a persistent embedding store (optional)
-    try:
-        from .embeddings import FAISSEmbeddingStore
-        _embed_store = FAISSEmbeddingStore(str(project_root / config.index_dir_name / "faiss"))
-    except Exception:
-        _embed_store = None
+    _embed_store = _open_embed_store(project_root, config)
 
     def _process(path: Path):
-        text = read_text_safe(path)
+        text = read_text_safe(path, max_file_bytes=getattr(config, 'max_file_bytes', 2_000_000))
         if text is None:
             raise RuntimeError("unable to read file")
         rel = str(path.relative_to(project_root))
@@ -51,12 +106,11 @@ def build_index(project_root: Path, config: XkitConfig, show_progress: bool = Fa
         return rel, file_hash, file_tokens, file_chunks
 
     # Parallelize file processing to speed up indexing on large repos.
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 4) * 2)) as ex:
         futures = {ex.submit(_process, path): path for path in all_files}
         processed = 0
         for fut in as_completed(futures):
             processed += 1
-            path = futures[fut]
             try:
                 rel, file_hash, file_tokens, file_chunks = fut.result()
             except Exception:
@@ -85,38 +139,9 @@ def build_index(project_root: Path, config: XkitConfig, show_progress: bool = Fa
     write_json(store / "index.json", index)
     write_jsonl(store / "chunks.jsonl", chunks)
 
-    # Try to compute embeddings and persist to FAISS (optional)
-    if _embed_store is not None and chunks:
-        try:
-            from sentence_transformers import SentenceTransformer
-            import numpy as np
-            model = SentenceTransformer(config.embedding_model, device=config.embedding_device)
-            texts = [c.get("text", "") + "\nFile: " + c.get("file", "") + ("\nSymbol: " + str(c.get("symbol", "")) if c.get("symbol") else "") for c in chunks]
-            ids = [c.get("chunk_id") for c in chunks]
-            metadatas = [{k: v for k, v in c.items() if k != "text"} for c in chunks]
-            embs = model.encode(texts, show_progress_bar=False, normalize_embeddings=True)
-            embs = np.asarray(embs, dtype=np.float32)
-            t0 = time.time()
-            _embed_store.upsert(str(project_root.name), ids, embs, metadatas, texts)
-            upsert_dur = time.time() - t0
-            try:
-                metrics = read_json(store / "metrics.json", {})
-                metrics.setdefault("embedding_runs", [])
-                metrics["embedding_runs"].append({
-                    "type": "full",
-                    "duration_sec": round(upsert_dur, 3),
-                    "chunk_count": len(ids),
-                    "updated_at": int(time.time()),
-                })
-                write_json(store / "metrics.json", metrics)
-            except Exception:
-                pass
-        except Exception as e:
-            _logger.warning("Embedding upsert failed: %s", e)
+    _embed_and_persist(_embed_store, project_root, store, config, chunks, "full")
 
-    metrics = read_json(store / "metrics.json", {})
-    metrics.setdefault("index_runs", [])
-    metrics["index_runs"].append({
+    _append_metric(store, config, "index_runs", {
         "type": "full",
         "duration_sec": round(time.time() - started, 3),
         "file_count": len(files_meta),
@@ -124,7 +149,6 @@ def build_index(project_root: Path, config: XkitConfig, show_progress: bool = Fa
         "full_repo_token_estimate": full_repo_tokens,
         "updated_at": int(time.time()),
     })
-    write_json(store / "metrics.json", metrics)
 
     elapsed = time.time() - started
     _progress(f"Done in {elapsed:.2f}s — {len(files_meta)} files, {len(chunks)} chunks", show_progress)
@@ -152,15 +176,10 @@ def update_changed_files(project_root: Path, config: XkitConfig, show_progress: 
     total = len(all_files)
     _progress(f"Checking {total} files for changes...", show_progress)
 
-    # Try to initialize a persistent embedding store (optional)
-    try:
-        from .embeddings import FAISSEmbeddingStore
-        _embed_store = FAISSEmbeddingStore(str(project_root / config.index_dir_name / "faiss"))
-    except Exception:
-        _embed_store = None
+    _embed_store = _open_embed_store(project_root, config)
 
     def _process(path: Path):
-        text = read_text_safe(path)
+        text = read_text_safe(path, max_file_bytes=getattr(config, 'max_file_bytes', 2_000_000))
         if text is None:
             return None
         rel = str(path.relative_to(project_root))
@@ -170,13 +189,12 @@ def update_changed_files(project_root: Path, config: XkitConfig, show_progress: 
         return rel, file_hash, file_tokens, file_chunks
 
     # Parallelize file checking and chunking
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 4) * 2)) as ex:
         futures = {ex.submit(_process, path): path for path in all_files}
 
         processed = 0
         for fut in as_completed(futures):
             processed += 1
-            path = futures[fut]
             try:
                 result = fut.result()
                 if result is None:
@@ -218,9 +236,7 @@ def update_changed_files(project_root: Path, config: XkitConfig, show_progress: 
     write_json(store / "index.json", index)
     write_jsonl(store / "chunks.jsonl", all_chunks)
 
-    metrics = read_json(store / "metrics.json", {})
-    metrics.setdefault("index_runs", [])
-    metrics["index_runs"].append({
+    _append_metric(store, config, "index_runs", {
         "type": "incremental",
         "duration_sec": round(time.time() - started, 3),
         "changed_files": changed_files,
@@ -232,36 +248,18 @@ def update_changed_files(project_root: Path, config: XkitConfig, show_progress: 
         "full_repo_token_estimate": full_repo_tokens,
         "updated_at": int(time.time()),
     })
-    write_json(store / "metrics.json", metrics)
 
-    # Try to compute embeddings for new chunks and persist (optional)
-    if _embed_store is not None and new_chunks:
+    _embed_and_persist(_embed_store, project_root, store, config, new_chunks, "incremental")
+
+    # Remove stale vectors for changed/deleted files so search never returns
+    # chunks that no longer exist.
+    if _embed_store is not None and changed_set:
         try:
-            from sentence_transformers import SentenceTransformer
-            import numpy as np
-            model = SentenceTransformer(config.embedding_model, device=config.embedding_device)
-            texts = [c.get("text", "") + "\nFile: " + c.get("file", "") + ("\nSymbol: " + str(c.get("symbol", "")) if c.get("symbol") else "") for c in new_chunks]
-            ids = [c.get("chunk_id") for c in new_chunks]
-            metadatas = [{k: v for k, v in c.items() if k != "text"} for c in new_chunks]
-            embs = model.encode(texts, show_progress_bar=False, normalize_embeddings=True)
-            embs = np.asarray(embs, dtype=np.float32)
-            t0 = time.time()
-            _embed_store.upsert(str(project_root.name), ids, embs, metadatas, texts)
-            upsert_dur = time.time() - t0
-            try:
-                metrics = read_json(store / "metrics.json", {})
-                metrics.setdefault("embedding_runs", [])
-                metrics["embedding_runs"].append({
-                    "type": "incremental",
-                    "duration_sec": round(upsert_dur, 3),
-                    "chunk_count": len(ids),
-                    "updated_at": int(time.time()),
-                })
-                write_json(store / "metrics.json", metrics)
-            except Exception:
-                pass
+            stale_ids = [c["chunk_id"] for c in existing_chunks if c["file"] in changed_set]
+            if stale_ids:
+                _embed_store.remove(str(project_root.name), stale_ids)
         except Exception as e:
-            _logger.warning("Embedding upsert failed (incremental): %s", e)
+            _logger.warning("Stale embedding removal failed: %s", e)
 
     elapsed = time.time() - started
     _progress(

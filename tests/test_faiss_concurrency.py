@@ -1,14 +1,11 @@
 import multiprocessing as mp
 import time
-import os
-import sys
+
 import pytest
 
 
 def has_faiss():
     try:
-        import faiss  # type: ignore
-        import numpy as np  # type: ignore
         return True
     except Exception:
         return False
@@ -17,8 +14,9 @@ def has_faiss():
 @pytest.mark.skipif(not has_faiss(), reason="faiss not installed")
 def test_faiss_concurrent_writes_and_reads(tmp_path):
     """Integration-style test: spawn two processes that upsert different ids while main process queries."""
-    from xkit.embeddings import FAISSEmbeddingStore
     import numpy as np
+
+    from xkit.embeddings import FAISSEmbeddingStore
 
     persist = str(tmp_path / "faiss")
     namespace = "testns"

@@ -2,8 +2,9 @@
 
 import tempfile
 from pathlib import Path
-from xkit.files import sha256_text, read_text_safe, iter_project_files
+
 from xkit.config import XkitConfig
+from xkit.files import iter_project_files, read_text_safe, sha256_text
 
 
 def test_sha256_text():
@@ -41,18 +42,16 @@ def test_read_text_safe_nonexistent():
 
 
 def test_read_text_safe_large_file():
-    """read_text_safe should return a truncated preview for very large files."""
+    """Files over max_file_bytes are skipped — they're generated/minified noise."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write("x" * 3_000_000)  # > 2MB
+        f.write("x" * 3_000_000)  # > 2MB default cap
         path = Path(f.name)
     try:
-        content = read_text_safe(path)
-        assert content is not None
-        # For moderately large files (<50MB) we return full content; for very large files we return a truncated preview.
-        assert len(content) == 3_000_000
+        assert read_text_safe(path) is None
+        # ...but readable when the caller raises the cap
+        assert read_text_safe(path, max_file_bytes=5_000_000) is not None
     finally:
         path.unlink()
-
 
 def test_iter_project_files():
     """iter_project_files should yield only code files."""

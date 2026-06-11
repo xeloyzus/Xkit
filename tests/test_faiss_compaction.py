@@ -3,8 +3,6 @@ import pytest
 
 def has_faiss():
     try:
-        import faiss  # type: ignore
-        import numpy as np  # type: ignore
         return True
     except Exception:
         return False
@@ -12,8 +10,9 @@ def has_faiss():
 
 @pytest.mark.skipif(not has_faiss(), reason="faiss not installed")
 def test_compact_and_remove(tmp_path):
-    from xkit.embeddings import FAISSEmbeddingStore
     import numpy as np
+
+    from xkit.embeddings import FAISSEmbeddingStore
 
     persist = str(tmp_path / "faiss")
     ns = "test"

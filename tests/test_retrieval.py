@@ -1,12 +1,14 @@
 """Tests for the retrieval module."""
 
-from xkit.retrieval import LocalTfidfRetriever, tokenize, create_retriever
+from xkit.retrieval import BM25Retriever, LocalTfidfRetriever, create_retriever, tokenize
 
 
 def test_tokenize():
     """Tokenization should extract words and lowercase them."""
     assert tokenize("Hello World") == ["hello", "world"]
-    assert tokenize("foo_bar baz") == ["foo_bar", "baz"]
+    toks = tokenize("foo_bar baz")
+    assert "foo_bar" in toks and "baz" in toks
+    assert "foo" in toks and "bar" in toks  # identifier parts are searchable
     assert tokenize("") == []
     assert tokenize("123") == []
 
@@ -56,16 +58,14 @@ def test_tfidf_no_match():
 
 
 def test_create_retriever_default():
-    """create_retriever with default method should return TF-IDF."""
+    """create_retriever with default method should return BM25."""
     chunks = [{"text": "test", "file": "test.py"}]
     retriever = create_retriever(chunks)
-    from xkit.retrieval import LocalTfidfRetriever
-    assert isinstance(retriever, LocalTfidfRetriever)
+    assert isinstance(retriever, BM25Retriever)
 
 
 def test_create_retriever_embeddings_fallback():
     """create_retriever with 'embeddings' should fall back to TF-IDF if deps missing."""
     chunks = [{"text": "test", "file": "test.py"}]
     retriever = create_retriever(chunks, method="embeddings")
-    from xkit.retrieval import LocalTfidfRetriever
-    assert isinstance(retriever, LocalTfidfRetriever)
+    assert isinstance(retriever, BM25Retriever)

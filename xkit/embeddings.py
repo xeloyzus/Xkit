@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
 import json
-from contextlib import contextmanager
 import os
-import time
 import shutil
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
+from typing import List, Optional, Tuple
+
+# Re-entrant lock machinery shared by all FAISSEmbeddingStore instances:
+# one RLock per lock-file path (intra-process serialization) and a
+# thread-local depth counter so only the outermost frame takes the OS lock.
+_LOCK_REGISTRY: dict[str, threading.RLock] = {}
+_LOCK_REGISTRY_GUARD = threading.Lock()
+_LOCK_DEPTHS = threading.local()
 
 
 class PersistentEmbeddingStore:
@@ -64,65 +72,73 @@ class FAISSEmbeddingStore:
 
     @contextmanager
     def _file_lock(self, lock_path: str, mode: str = "ex"):
-        """Cross-platform file lock. mode 'ex' exclusive, 'sh' shared (best-effort on Windows)."""
+        """Cross-platform, *re-entrant* file lock.
+
+        Intra-process: a per-path threading.RLock serializes threads and allows
+        nested acquisition (remove() -> _load() -> rebuild() all lock the same
+        path). Inter-process: the OS lock (flock/msvcrt) is taken only by the
+        outermost frame — taking flock twice on separate fds of the same file
+        deadlocks the process, which is exactly the bug this fixes.
+        """
         self._ensure_parent(Path(lock_path))
-        # open in binary read/write
-        f = open(lock_path, "a+b")
+        with _LOCK_REGISTRY_GUARD:
+            rlock = _LOCK_REGISTRY.setdefault(lock_path, threading.RLock())
+        rlock.acquire()
+        depths = getattr(_LOCK_DEPTHS, "by_path", None)
+        if depths is None:
+            depths = _LOCK_DEPTHS.by_path = {}
+        outermost = depths.get(lock_path, 0) == 0
+        depths[lock_path] = depths.get(lock_path, 0) + 1
+        f = None
         try:
-            if os.name == "nt":
-                # try msvcrt
-                try:
-                    import msvcrt
-                    if mode == "sh":
-                        # emulate shared via exclusive read-lock (best-effort)
-                        msvcrt.locking(f.fileno(), msvcrt.LK_RLCK, 1)
-                    else:
-                        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-                except Exception:
-                    # fallback to portalocker if installed
-                    try:
-                        import portalocker
-
-                        portalocker.lock(f, portalocker.LOCK_EX if mode != "sh" else portalocker.LOCK_SH)
-                    except Exception:
-                        # last resort: proceed without cross-process lock (risky)
-                        pass
-            else:
-                import fcntl
-
-                if mode == "sh":
-                    fcntl.flock(f, fcntl.LOCK_SH)
-                else:
-                    fcntl.flock(f, fcntl.LOCK_EX)
-            yield
-        finally:
-            try:
+            if outermost:
+                f = open(lock_path, "a+b")
                 if os.name == "nt":
                     try:
                         import msvcrt
-                        try:
-                            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-                        except Exception:
-                            pass
+                        if mode == "sh":
+                            msvcrt.locking(f.fileno(), msvcrt.LK_RLCK, 1)
+                        else:
+                            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
                     except Exception:
                         try:
                             import portalocker
-
-                            portalocker.unlock(f)
+                            portalocker.lock(f, portalocker.LOCK_EX if mode != "sh" else portalocker.LOCK_SH)
+                        except Exception:
+                            pass  # last resort: intra-process lock only
+                else:
+                    import fcntl
+                    if mode == "sh":
+                        fcntl.flock(f, fcntl.LOCK_SH)
+                    else:
+                        fcntl.flock(f, fcntl.LOCK_EX)
+            yield
+        finally:
+            depths[lock_path] -= 1
+            if outermost and f is not None:
+                try:
+                    if os.name == "nt":
+                        try:
+                            import msvcrt
+                            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                        except Exception:
+                            try:
+                                import portalocker
+                                portalocker.unlock(f)
+                            except Exception:
+                                pass
+                    else:
+                        try:
+                            import fcntl
+                            fcntl.flock(f, fcntl.LOCK_UN)
                         except Exception:
                             pass
-                else:
+                finally:
                     try:
-                        import fcntl
-
-                        fcntl.flock(f, fcntl.LOCK_UN)
+                        f.close()
                     except Exception:
                         pass
-            finally:
-                try:
-                    f.close()
-                except Exception:
-                    pass
+            rlock.release()
 
     def _ns_paths(self, namespace: str) -> Tuple[Path, Path, Path, Path, Path, Path, Path, Path]:
         ns = self._root / namespace
@@ -299,7 +315,6 @@ class FAISSEmbeddingStore:
 
             index, old_ids, old_meta, old_vectors, idmap, next_id, free_ids = loaded
             existing_set = set(old_ids)
-            new_ids = [i for i in ids if i not in existing_set]
             replace_ids = [i for i in ids if i in existing_set]
 
             if replace_ids:
@@ -379,9 +394,14 @@ class FAISSEmbeddingStore:
                     self._save(namespace, index, old_ids, vectors=all_vectors, meta=old_meta)
             return
 
+    def has_namespace(self, namespace: str) -> bool:
+        """True if a queryable FAISS index exists on disk for this namespace."""
+        idx_path, *_ = self._ns_paths(namespace)
+        return idx_path.exists()
+
     def query(self, namespace: str, query_embeddings, top_k: int = 8):
         q = self._np.asarray(query_embeddings, dtype=self._np.float32)
-        idx_path, ids_path, meta_path, vecs_path, lock_path, *_ = self._ns_paths(namespace)
+        idx_path, ids_path, meta_path, vecs_path, lock_path, idmap_path, *_ = self._ns_paths(namespace)
         if not idx_path.exists():
             return []
         with self._file_lock(str(lock_path), mode="sh"):
@@ -393,19 +413,34 @@ class FAISSEmbeddingStore:
                 ids = self._np.load(str(ids_path), allow_pickle=True).tolist()
             except Exception:
                 ids = []
+            idmap = None
+            try:
+                if idmap_path.exists():
+                    idmap = json.loads(idmap_path.read_text(encoding="utf-8"))
+            except Exception:
+                idmap = None
+        # The index stores *numeric* ids (assigned starting at 1, with gaps after
+        # removals), so search results must be resolved through the reverse idmap —
+        # never by list position.
+        if idmap:
+            reverse = {int(v): k for k, v in idmap.items()}
+        else:
+            # Legacy stores without an idmap used sequential ids starting at 1.
+            reverse = {i + 1: _id for i, _id in enumerate(ids)}
         if q.ndim == 1:
             q = q.reshape(1, -1)
         norms = self._np.linalg.norm(q, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         q = q / norms
-        D, I = index.search(q, top_k)
+        scores_arr, ids_arr = index.search(q, top_k)
         results = []
-        for row_scores, row_idx in zip(D, I):
+        for row_scores, row_idx in zip(scores_arr, ids_arr, strict=True):
             row = []
-            for score, idx in zip(row_scores, row_idx):
-                if idx < 0 or idx >= len(ids):
+            for score, numeric_id in zip(row_scores, row_idx, strict=True):
+                original_id = reverse.get(int(numeric_id))
+                if numeric_id < 0 or original_id is None:
                     continue
-                row.append({"id": ids[idx], "score": float(score)})
+                row.append({"id": original_id, "score": float(score)})
             results.append(row)
         return results
 
@@ -499,7 +534,7 @@ class FAISSEmbeddingStore:
         report["exists"] = True
         with self._file_lock(str(lock_path), mode="sh"):
             try:
-                index = self._faiss.read_index(str(idx_path))
+                self._faiss.read_index(str(idx_path))
                 report["index_ok"] = True
             except Exception as e:
                 report["index_ok"] = False

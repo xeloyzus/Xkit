@@ -1,0 +1,6 @@
+line-length = 110
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "B"]
+ignore = ["E501"]  # long lines tolerated in data tables / messages

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+
 from .config import XkitConfig
 from .retrieval import create_retriever
-from .store import ensure_store, read_json, read_jsonl, write_json, append_jsonl
+from .store import append_jsonl, ensure_store, read_json, read_jsonl, write_json
 from .token_estimator import estimate_tokens
 
 
@@ -21,29 +22,50 @@ def retrieve_context(project_root: Path, task: str, config: XkitConfig, top_k: i
         method=config.retriever,
         model_name=config.embedding_model,
         device=config.embedding_device,
+        project_root=project_root,
+        index_dir_name=config.index_dir_name,
     )
     candidates = retriever.search(task, top_k=top_k * 3)
 
-    selected = []
-    used_tokens = estimate_tokens(task)
-    for result in candidates:
-        chunk = result.chunk
-        chunk_tokens = int(chunk.get("token_estimate", estimate_tokens(chunk.get("text", ""))))
-        if selected and used_tokens + chunk_tokens > budget_tokens:
-            continue
-        selected.append({
-            "score": round(result.score, 4),
+    def _entry(chunk: dict, score: float, text: str, chunk_tokens: int) -> dict:
+        return {
+            "score": round(score, 4),
             "file": chunk["file"],
             "symbol": chunk.get("symbol"),
             "kind": chunk.get("kind"),
             "start_line": chunk["start_line"],
             "end_line": chunk["end_line"],
             "token_estimate": chunk_tokens,
-            "text": chunk["text"],
-        })
+            "text": text,
+        }
+
+    # Pass 1: greedily add whole chunks that fit the budget, best score first.
+    selected = []
+    used_tokens = estimate_tokens(task)
+    for result in candidates:
+        chunk = result.chunk
+        chunk_tokens = int(chunk.get("token_estimate", estimate_tokens(chunk.get("text", ""))))
+        if used_tokens + chunk_tokens > budget_tokens:
+            continue  # a smaller candidate further down may still fit
+        selected.append(_entry(chunk, result.score, chunk["text"], chunk_tokens))
         used_tokens += chunk_tokens
         if len(selected) >= top_k:
             break
+
+    # Pass 2: if nothing fit at all, truncate the single best chunk so callers
+    # still get useful context — the budget remains a hard ceiling either way.
+    if not selected and candidates:
+        best = candidates[0]
+        marker = "\n/* chunk truncated to fit token budget */"
+        remaining = max(0, budget_tokens - used_tokens - estimate_tokens(marker))
+        text = best.chunk["text"][: max(0, int(remaining * 3.5))]
+        while text and estimate_tokens(text) > remaining:
+            text = text[: int(len(text) * 0.8)]
+        if text:
+            text += marker
+            chunk_tokens = estimate_tokens(text)
+            selected.append(_entry(best.chunk, best.score, text, chunk_tokens))
+            used_tokens += chunk_tokens
 
     full_repo_tokens = int(index.get("full_repo_token_estimate", 0))
     savings_tokens = max(0, full_repo_tokens - used_tokens)
@@ -66,6 +88,9 @@ def retrieve_context(project_root: Path, task: str, config: XkitConfig, top_k: i
     metrics = read_json(store / "metrics.json", {})
     metrics.setdefault("retrieval_runs", [])
     metrics["retrieval_runs"].append(event)
+    limit = getattr(config, "metrics_history_limit", 200)
+    if len(metrics["retrieval_runs"]) > limit:
+        metrics["retrieval_runs"] = metrics["retrieval_runs"][-limit:]
     write_json(store / "metrics.json", metrics)
 
     return {"event": event, "chunks": selected}
@@ -76,7 +101,7 @@ def format_context_markdown(result: dict) -> str:
     lines = [
         "# AI Agent Context Pack",
         "",
-        f"## Task",
+        "## Task",
         event["task"],
         "",
         "## Token Metrics",
